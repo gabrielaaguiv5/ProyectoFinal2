@@ -118,7 +118,7 @@ También genera:
   ```DAX
   Clientes Activos = COUNTROWS(FILTER(Clientes, Clientes[estado] = "Frecuente"))
 ---
-# Fase 6: Documentación y Publicación
+### Fase 6: Documentación y Publicación
 
 ### El código, los notebooks y los datos limpios se organizan dentro de un repositorio GitHub.
 - Se documentan las dependencias en requirements.txt.
