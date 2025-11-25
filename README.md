@@ -37,7 +37,20 @@ Cada fase deja resultados ordenados en la carpeta /data/ y el orquestador valida
 ## Fases del Proyecto
 
 ### **Fase 1: Extracción de Datos (WhatsApp + Supabase)**
-- Los mensajes llegan al sistema exclusivamente desde una tabla Supabase que almacena los chats exportados por el negocio
+- SmartChat Insight puede obtener los chats desde dos fuentes:
+
+1. Archivos .txt exportados desde WhatsApp
+
+WhatsApp → Exportar chat → Sin archivos multimedia
+
+Guardar los .txt en:
+/data/raw_chats/
+
+2. Servidor Supabase
+
+También es posible almacenar o sincronizar los chats en una tabla Supabase y descargarlos desde allí para ser procesados automáticamente.
+
+Esto permite tener un backend centralizado, histórico y accesible para múltiples usuarios o dispositivos.
 
 ---
 
