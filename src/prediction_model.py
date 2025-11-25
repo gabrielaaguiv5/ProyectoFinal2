@@ -7,6 +7,7 @@ import sys
 import pandas as pd
 from pathlib import Path
 import numpy as np
+from datetime import datetime
 
 # Forzar UTF-8 en Windows para evitar errores con emojis
 sys.stdout.reconfigure(encoding="utf-8")
@@ -80,19 +81,20 @@ def preparar_clientes(clientes_final):
 def recomendar(row, reglas):
     estado = row["estado"]
     ultimo = row["ultimo_contacto"]
+    hoy = datetime.today().date()
 
     regla = reglas.get(estado)
     if not regla:
         return pd.Series({
             "accion_recomendada": "Revisar",
-            "probabilidad_conversion": np.nan,
+            "dias_para_contactar": np.nan,
             "fecha_recomendada_contacto": None
         })
 
     return pd.Series({
         "accion_recomendada": regla["accion"],
-        "probabilidad_conversion": regla["probabilidad_conversion"],
-        "fecha_recomendada_contacto": (ultimo + pd.Timedelta(days=regla["dias_para_contactar"])).date()
+        "dias_para_contactar": regla["dias_para_contactar"],
+        "fecha_recomendada_contacto": (hoy + pd.Timedelta(days=regla["dias_para_contactar"])).date()
     })
 
 
