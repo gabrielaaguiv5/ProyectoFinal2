@@ -17,11 +17,12 @@ warnings.filterwarnings("ignore", category=UserWarning)
 # RUTAS RELATIVAS UNIVERSALES
 # =========================================================
 
-BASE_DIR   = Path(__file__).resolve().parent.parent       # /src → sube al proyecto
-DATA_DIR   = BASE_DIR / "data"
+# /src → sube al proyecto
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = BASE_DIR / "data"
 CLEAN_PATH = DATA_DIR / "cleaned"
 OUTPUT_PATH = DATA_DIR / "outputs"
-FINAL_PATH  = OUTPUT_PATH / "final"
+FINAL_PATH = OUTPUT_PATH / "final"
 
 # Crear carpetas si no existen
 OUTPUT_PATH.mkdir(parents=True, exist_ok=True)
@@ -37,6 +38,7 @@ PRODUCTOS_CLAVE = [
 # Funciones
 # ---------------------------------------------------------
 
+
 def clasificar_cliente(dias: int) -> str:
     if dias <= 15:
         return "Frecuente"
@@ -48,7 +50,7 @@ def clasificar_cliente(dias: int) -> str:
 
 def generate_plots(activity_df: pd.DataFrame, products_df: pd.DataFrame):
     """Genera gráficos automáticos en la carpeta outputs."""
-    
+
     # ---- Gráfico 1 ----
     plt.figure(figsize=(8, 5))
     activity_df["estado"].value_counts().plot(kind="bar", color='#3b82f6')
@@ -95,13 +97,15 @@ def run_analysis_and_export(df: pd.DataFrame):
               mensajes=("message", "count"),
               primer_contacto=("date", "min"),
               ultimo_contacto=("date", "max")
-          )
-          .reset_index()
+        )
+        .reset_index()
     )
 
     max_date = df["date"].max()
-    activity["dias_desde_ultimo"] = (max_date - activity["ultimo_contacto"]).dt.days
-    activity["estado"] = activity["dias_desde_ultimo"].apply(clasificar_cliente)
+    activity["dias_desde_ultimo"] = (
+        max_date - activity["ultimo_contacto"]).dt.days
+    activity["estado"] = activity["dias_desde_ultimo"].apply(
+        clasificar_cliente)
 
     conteo_productos = {
         p: df["message"].str.contains(p, case=False, na=False).sum()
@@ -109,19 +113,41 @@ def run_analysis_and_export(df: pd.DataFrame):
     }
 
     df_productos = pd.DataFrame(
-        list(conteo_productos.items()), 
+        list(conteo_productos.items()),
         columns=["producto", "menciones"]
     ).sort_values(by="menciones", ascending=False)
+
+    menciones_por_cliente = []
+    for user, mensajes in df.groupby("user"):
+        registro = {"user": user}
+        for p in PRODUCTOS_CLAVE:
+            registro[p] = mensajes["message"].str.contains(
+                p, case=False, na=False).sum()
+        menciones_por_cliente.append(registro)
+
+    df_clientes_productos = pd.DataFrame(menciones_por_cliente)
+
+    # Producto más mencionado por cada cliente
+    df_clientes_productos["producto_preferido"] = df_clientes_productos[PRODUCTOS_CLAVE].idxmax(
+        axis=1)
+    df_clientes_productos["menciones_producto_preferido"] = df_clientes_productos.apply(
+        lambda row: row[row["producto_preferido"]], axis=1
+    )
+
+    # Unir con tabla de actividad
+    clientes_final = activity.merge(
+        df_clientes_productos[[
+            "user", "producto_preferido", "menciones_producto_preferido"]],
+        on="user",
+        how="left"
+    )
 
     generate_plots(activity, df_productos)
 
     print("\n[FASE DE EXPORTACION] Exportando archivos finales...")
 
-    clientes_final = activity.copy()
-    productos_final = df_productos.copy()
-
     clientes_final.columns = clientes_final.columns.str.lower().str.replace(" ", "_")
-    productos_final.columns = productos_final.columns.str.lower().str.replace(" ", "_")
+    df_productos.columns = df_productos.columns.str.lower().str.replace(" ", "_")
 
     resumen_clientes = (
         clientes_final.groupby("estado")
@@ -133,24 +159,29 @@ def run_analysis_and_export(df: pd.DataFrame):
         .reset_index()
     )
 
-    resumen_clientes["promedio_mensajes"] = resumen_clientes["promedio_mensajes"].round(1)
-    resumen_clientes["dias_promedio_inactividad"] = resumen_clientes["dias_promedio_inactividad"].round(1)
+    resumen_clientes["promedio_mensajes"] = resumen_clientes["promedio_mensajes"].round(
+        1)
+    resumen_clientes["dias_promedio_inactividad"] = resumen_clientes["dias_promedio_inactividad"].round(
+        1)
     resumen_clientes["fecha_reporte"] = datetime.now().strftime("%Y-%m-%d")
 
     # Guardado final en rutas RELATIVAS
-    clientes_final.to_csv(FINAL_PATH / "clientes_powerbi.csv", index=False, encoding="utf-8-sig", sep=";")
-    productos_final.to_csv(FINAL_PATH / "productos_powerbi.csv", index=False, encoding="utf-8-sig", sep=";")
-    resumen_clientes.to_csv(FINAL_PATH / "resumen_clientes.csv", index=False, encoding="utf-8-sig", sep=";")
+    clientes_final.to_csv(FINAL_PATH / "clientes_final_powerbi.csv",
+                          index=False, encoding="utf-8-sig", sep=";")
+    df_productos.to_csv(FINAL_PATH / "productos_powerbi.csv",
+                        index=False, encoding="utf-8-sig", sep=";")
+    resumen_clientes.to_csv(FINAL_PATH / "resumen_clientes.csv",
+                            index=False, encoding="utf-8-sig", sep=";")
 
     print("✅ Exportación final completada.")
     print(f"Archivos guardados en: {FINAL_PATH}")
 
-    return clientes_final, productos_final, resumen_clientes
-
+    return clientes_final, df_productos, resumen_clientes
 
 # ---------------------------------------------------------
 # Entrada de prueba
 # ---------------------------------------------------------
+
 
 if __name__ == "__main__":
     print("Ejecutando prueba del módulo de análisis...")

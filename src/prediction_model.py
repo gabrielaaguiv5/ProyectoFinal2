@@ -5,9 +5,6 @@
 
 import sys
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.metrics import classification_report
 from pathlib import Path
 import numpy as np
 
@@ -21,154 +18,133 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 FINAL_PATH = BASE_DIR / "data" / "outputs" / "final"
 
 
-# ---------------------------------------------------------
-# Clasificación de riesgo corregida (basada en abandono)
-# ---------------------------------------------------------
-def clasificar_riesgo(prob_abandono: float) -> str:
-    if prob_abandono >= 0.70:
-        return "Alto riesgo"
-    elif prob_abandono >= 0.40:
-        return "Riesgo medio"
-    else:
-        return "Bajo riesgo"
+# =========================================================
+# Carga de datos
+# =========================================================
+
+def cargar_archivos():
+    print("Cargando archivos finales...")
+
+    clientes = pd.read_csv(FINAL_PATH / "clientes_powerbi.csv", sep=";")
+    clientes_final = pd.read_csv(
+        FINAL_PATH / "clientes_final_powerbi.csv", sep=";")
+    productos = pd.read_csv(FINAL_PATH / "productos_powerbi.csv", sep=";")
+    resumen = pd.read_csv(FINAL_PATH / "resumen_clientes.csv", sep=";")
+
+    print("Archivos cargados correctamente")
+    return clientes, clientes_final, productos, resumen
 
 
-# ---------------------------------------------------------
-# Función principal
-# ---------------------------------------------------------
-def run_prediction_model():
+# =========================================================
+# Procesamiento de fechas y reglas
+# =========================================================
 
-    print("\n[FASE DE PREDICCIÓN] Iniciando módulo de Machine Learning...\n")
+REGLAS_BASE = {
+    "Frecuente": {"accion": "Mantener flujo de comunicación", "probabilidad_conversion": 0.75, "dias_para_contactar": 7},
+    "Inactivo reciente": {"accion": "Mensaje de seguimiento", "probabilidad_conversion": 0.45, "dias_para_contactar": 2},
+    "Perdido": {"accion": "Campaña de reactivación", "probabilidad_conversion": 0.18, "dias_para_contactar": 1},
+}
 
-    # -----------------------------------------------------
-    # 1. Cargar datos (CORREGIDO)
-    # -----------------------------------------------------
-    try:
-        # --- CORREGIDO: SIN parse_dates ---
-        clientes = pd.read_csv(
-            FINAL_PATH / "clientes_powerbi.csv",
-            sep=";",
-            encoding="utf-8",
-            engine="python"
-        )
 
-        # Manejo opcional de fecha si llega a existir
-        if "date" in clientes.columns:
-            clientes["date"] = pd.to_datetime(clientes["date"], errors="coerce")
+def preparar_clientes(clientes_final):
+    print("Procesando columnas de fechas y reglas...")
 
-        productos = pd.read_csv(
-            FINAL_PATH / "productos_powerbi.csv",
-            sep=";",
-            encoding="utf-8",
-            engine="python"
-        )
+    for col in ["primer_contacto", "ultimo_contacto"]:
+        clientes_final[col] = pd.to_datetime(
+            clientes_final[col], errors="ignore")
 
-    except FileNotFoundError as e:
-        print("❌ ERROR: No se encuentran los archivos requeridos. Ejecute el módulo de análisis primero.")
-        print(f"Detalle: {e}")
-        return pd.DataFrame(), None
+    fecha_corte = clientes_final["ultimo_contacto"].max().date()
+    print(f"Fecha de corte: {fecha_corte}")
 
-    except Exception as e:
-        print(f"❌ Error al cargar datos: {e}")
-        return pd.DataFrame(), None
-
-    # -----------------------------------------------------
-    # 2. Limpieza y preparación
-    # -----------------------------------------------------
-    print("-> Preparando datos para el modelo...")
-
-    clientes["mensajes"] = clientes["mensajes"].fillna(0)
-    clientes["dias_desde_ultimo"] = clientes["dias_desde_ultimo"].fillna(0)
-
-    clientes["activo"] = clientes["estado"].apply(
-        lambda x: 1 if str(x).lower() in ["frecuente", "inactivo reciente"] else 0
+    # Cliente nuevo (últimos 3 días)
+    clientes_final["nuevo"] = clientes_final["primer_contacto"] >= (
+        pd.to_datetime(fecha_corte) - pd.Timedelta(days=3)
     )
+    clientes_final.loc[clientes_final["nuevo"], "estado"] = "Nuevo"
 
-    X = clientes[["mensajes", "dias_desde_ultimo"]]
-    y = clientes["activo"]
+    # Combinar reglas
+    reglas = REGLAS_BASE.copy()
+    reglas["Nuevo"] = {
+        "accion": "Mensaje de bienvenida",
+        "probabilidad_conversion": 0.90,
+        "dias_para_contactar": 0
+    }
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.20, random_state=42
-    )
-
-    # -----------------------------------------------------
-    # 3. Entrenamiento
-    # -----------------------------------------------------
-    print("-> Entrenando modelo de Árbol de Decisión...")
-
-    modelo = DecisionTreeClassifier(max_depth=4, random_state=42)
-    modelo.fit(X_train, y_train)
-
-    print("\n=== Evaluación del Modelo ===")
-    y_pred = modelo.predict(X_test)
-
-    print(classification_report(y_test, y_pred, zero_division=0))
-
-    # -----------------------------------------------------
-    # 4. Predicción final + clasificación de riesgo
-    # -----------------------------------------------------
-    prob_activo = modelo.predict_proba(X)[:, 1]
-    clientes["probabilidad_activo"] = prob_activo
-    clientes["probabilidad_abandono"] = 1 - prob_activo
-
-    clientes["nivel_riesgo"] = clientes["probabilidad_abandono"].apply(clasificar_riesgo)
-
-    clientes_riesgo = clientes[clientes["nivel_riesgo"] == "Alto riesgo"]
-    print(f"\nClientes en alto riesgo: {len(clientes_riesgo)}")
-
-    # Exportar resultados
-    salida = clientes[
-        [
-            "user",
-            "mensajes",
-            "dias_desde_ultimo",
-            "estado",
-            "probabilidad_activo",
-            "probabilidad_abandono",
-            "nivel_riesgo",
-        ]
-    ]
-
-    salida.to_csv(FINAL_PATH / "clientes_predicciones.csv",
-                  index=False,
-                  encoding="utf-8-sig",
-                  sep=";")
-
-    print(f"\nArchivo generado: {FINAL_PATH / 'clientes_predicciones.csv'}")
-
-    # -----------------------------------------------------
-    # 5. Sistema de recomendación (omitido)
-    # -----------------------------------------------------
-    print("\n[SISTEMA DE RECOMENDACIÓN]")
-    print("No hay matriz cliente-producto disponible. Se omite similitud.")
-    similaridad_df = None
-
-    # -----------------------------------------------------
-    # 6. Alertas automáticas
-    # -----------------------------------------------------
-    print("\n=== ALERTAS AUTOMÁTICAS ===")
-
-    if not clientes_riesgo.empty:
-        print(f"{len(clientes_riesgo)} clientes requieren contacto inmediato:\n")
-        for i, row in clientes_riesgo.head(5).iterrows():
-            print(
-                f"Cliente: {row['user']} | "
-                f"Prob. Abandono: {row['probabilidad_abandono']:.2f} | "
-                f"Días sin actividad: {row['dias_desde_ultimo']} | "
-                f"Acción sugerida: Enviar mensaje de seguimiento."
-            )
-    else:
-        print("No hay clientes en alto riesgo.")
-
-    return salida, similaridad_df
+    return clientes_final, reglas
 
 
-# ---------------------------------------------------------
-# Ejecución de prueba
-# ---------------------------------------------------------
+# =========================================================
+# Lógica del modelo de recomendación
+# =========================================================
+
+def recomendar(row, reglas):
+    estado = row["estado"]
+    ultimo = row["ultimo_contacto"]
+
+    regla = reglas.get(estado)
+    if not regla:
+        return pd.Series({
+            "accion_recomendada": "Revisar",
+            "probabilidad_conversion": np.nan,
+            "fecha_recomendada_contacto": None
+        })
+
+    return pd.Series({
+        "accion_recomendada": regla["accion"],
+        "probabilidad_conversion": regla["probabilidad_conversion"],
+        "fecha_recomendada_contacto": (ultimo + pd.Timedelta(days=regla["dias_para_contactar"])).date()
+    })
+
+
+def generar_mensaje(row):
+    estado = row["estado"]
+    nombre = row["user"]
+
+    mensajes = {
+        "Frecuente": f"Hola {nombre}, gracias por mantener el contacto 😊. ¿En qué podemos ayudarte hoy?",
+        "Inactivo reciente": f"Hola {nombre}, hace unos días no conversamos. ¿Te sigo ayudando con tu pedido?",
+        "Perdido": f"Hola {nombre}, tenemos novedades y promociones disponibles para ti. ¿Deseas verlas?",
+        "Nuevo": f"¡Bienvenido {nombre}! Gracias por escribirnos 😊. ¿En qué podemos ayudarte hoy?",
+    }
+
+    return mensajes.get(estado, "Hola, ¿cómo podemos ayudarte?")
+
+
+# =========================================================
+# Pipeline principal (usado por el orquestador)
+# =========================================================
+
+def procesar_recomendaciones():
+    print("\nIniciando módulo: Predicción y Recomendación...")
+
+    # 1. Cargar datos
+    _, clientes_final, _, _ = cargar_archivos()
+
+    # 2. Procesar estructura
+    clientes_final, reglas = preparar_clientes(clientes_final)
+
+    # 3. Generar recomendaciones
+    print("Generando acciones recomendadas...")
+    reco = clientes_final.apply(lambda r: recomendar(r, reglas), axis=1)
+    clientes_final = pd.concat([clientes_final, reco], axis=1)
+
+    # Mensajes personalizados
+    clientes_final["mensaje_sugerido"] = clientes_final.apply(
+        generar_mensaje, axis=1)
+
+    # Exportar
+    output_path = FINAL_PATH / "acciones_recomendadas.csv"
+    clientes_final.to_csv(output_path, index=False, sep=";")
+
+    print(f"Archivo exportado: {output_path}")
+    print("Módulo completado.\n")
+
+    return clientes_final
+
+
+# =========================================================
+# Ejecución independiente (llamado por el orquestador)
+# =========================================================
+
 if __name__ == "__main__":
-    print("--- Prueba del módulo de predicción ---")
-    try:
-        run_prediction_model()
-    except Exception as e:
-        print(f"❌ Error en ejecución: {e}")
+    procesar_recomendaciones()
