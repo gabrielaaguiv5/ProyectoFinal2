@@ -118,7 +118,7 @@ mongoose.connect(MONGO_URI)
         const client = new Client({
             authStrategy: new RemoteAuth({
                 store: store,
-                backupSyncIntervalMs: 30000, 
+                backupSyncIntervalMs: 60000, 
                 dataPath: './'
             }),
             puppeteer: {
