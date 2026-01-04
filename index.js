@@ -20,7 +20,7 @@ if (!SUPABASE_URL || !SUPABASE_KEY || !MONGO_URI) {
     process.exit(1);
 }
 
-// --- 3. HEALTH CHECK (Para que Railway sepa que el bot vive) ---
+// --- 3. HEALTH CHECK ---
 const app = express();
 const port = process.env.PORT || 3000;
 app.get('/', (req, res) => res.status(200).send('Bot is Online'));
@@ -35,9 +35,15 @@ mongoose.connect(MONGO_URI).then(() => {
     const client = new Client({
         authStrategy: new RemoteAuth({
             store: store,
+            clientId: 'whatsapp', // 👈 Importante: Coincide con tus colecciones en MongoDB
             backupSyncIntervalMs: 60000,
             dataPath: './.wwebjs_auth' 
         }),
+        // Parche para evitar error de versión de WhatsApp Web
+        webVersionCache: {
+            type: 'remote',
+            remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+        },
         puppeteer: {
             headless: true,
             args: [
@@ -54,11 +60,12 @@ mongoose.connect(MONGO_URI).then(() => {
 
     // --- MANEJO DEL QR ---
     client.on('qr', async (qr) => {
-        console.log('📱 Nuevo QR generado.');
-        
-        // Solo mostrar QR en terminal si NO estamos en Railway (para no ensuciar logs)
+        // En Railway no imprimimos el QR en texto para no ensuciar logs
         if (!process.env.RAILWAY_ENVIRONMENT) {
+            console.log('📱 Nuevo QR generado (Local):');
             qrcode.generate(qr, { small: true });
+        } else {
+            console.log('📱 Nuevo QR generado en Railway. Subiendo a Supabase...');
         }
 
         try {
@@ -78,7 +85,7 @@ mongoose.connect(MONGO_URI).then(() => {
     client.on('ready', () => console.log('✅ BOT LISTO Y CONECTADO.'));
     
     client.on('remote_session_saved', () => {
-        console.log('💾 Sesión guardada en MongoDB con éxito.');
+        console.log('💾 Sesión guardada/actualizada en MongoDB con éxito.');
     });
 
     // --- LÓGICA DE MENSAJES ---
@@ -88,7 +95,7 @@ mongoose.connect(MONGO_URI).then(() => {
         const telefonoCliente = msg.from.replace('@c.us', '');
         
         try {
-            // Guardar entrada
+            // Guardar entrada en Supabase
             await supabase.from('mensajes_whatsapp').insert([{ 
                 telefono_origen: telefonoCliente, 
                 mensaje_texto: msg.body, 
@@ -113,6 +120,6 @@ mongoose.connect(MONGO_URI).then(() => {
     client.initialize();
 
 }).catch(err => {
-    console.error('❌ Error Mongo:', err.message);
+    console.error('❌ Error crítico en MongoDB:', err.message);
     process.exit(1);
 });
